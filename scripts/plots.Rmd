@@ -1,0 +1,987 @@
+---
+title: "Statistical Analysis Summary"
+author: "Mike"
+date: ""
+output: 
+  pdf_document:
+    includes:
+      in_header: header.tex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(haven)
+library(readr)
+library(tidyverse)
+library(forcats)
+library(modelsummary)
+library(kableExtra)
+library(ggcorrplot)
+library(descr)
+library(AER)
+library(crosstable)
+library(extrafont)
+
+# Load fonts
+#font_import()
+#loadfonts(device = "win")
+
+# Load data
+source("functions.R")
+load(file="C:/Users/mjcla\\Documents/School/4 Thesis/data/NSHAP/workspace/core_data.rda")
+
+# Rename dataset
+filteredData <- da36873.0001 %>% filter(AGE > 64)
+rm(da36873.0001)
+filteredData <- filteredData %>% mutate(AGE_CAT = factor(ifelse(AGE < 75, 1, 2), levels=c(1,2), labels=c("young-old", "old-old")))
+
+# Drop rows with multiple NAs
+filteredData <- filteredData[rowSums(is.na(filteredData[,c("VOLUNTEER","ATTEND","SOCIAL","ATNDSERV2","LEFTOUT2","ISOLATED2")]))!=6,]
+
+# Recode
+filteredData <- filteredData %>% mutate(INCOME_3 = (case_match(
+  as.integer(filteredData$HEARN_RECODE),
+  1 ~ NA, 2 ~ NA, 3 ~ NA, 4 ~ NA,
+  .default = filteredData$HEARN_RECODE)))
+filteredData <- filteredData %>% mutate(INCOME_RECODE = (case_match(
+  as.integer(filteredData$HEARN_RECODE),
+  1 ~ NA, 2 ~ NA, 3 ~ NA, 4 ~ NA, 5 ~ 12500, 6 ~ 37500, 7 ~ 75000, 8 ~ 150000,
+  .default = as.integer(filteredData$HEARN_RECODE))))
+filteredData$INCOME_T <- with(filteredData, INCOME_RECODE/1000)
+
+filteredData <- filteredData %>% mutate(ASSETS_3 = (case_match(
+  as.integer(filteredData$HSASSETS_RECODE),
+  1 ~ NA, 2 ~ NA, 3 ~ NA, 4 ~ NA,
+  .default = filteredData$HSASSETS_RECODE)))
+filteredData <- filteredData %>% mutate(ASSETS_RECODE = (case_match(
+  as.integer(filteredData$HSASSETS_RECODE), 
+  1 ~ NA, 2 ~ NA, 3 ~ NA, 4 ~ NA, 5~5000, 6~30000, 7~75000, 8~300000, 9~750000, 
+  .default = as.integer(filteredData$HSASSETS_RECODE))))
+filteredData$ASSETS_T <- with(filteredData, ASSETS_RECODE/1000)
+
+filteredData <- filteredData %>% mutate(Y_SCHOOLING = (case_match(
+  as.integer(filteredData$EDUC),
+  1 ~ 10, 2 ~ 12, 3 ~ 14, 4 ~ 16,
+  .default = as.integer(filteredData$EDUC))))
+
+filteredData <- filteredData %>% mutate(TIME_IN_RES = (case_match(
+  as.integer(filteredData$RESIDEY2),
+  1 ~ 0.5, 2 ~ 3, 3 ~ 8, 4 ~ 13, 5 ~ 18, 6 ~ 23, 7 ~ 38, 8 ~ 60,
+  .default = as.integer(filteredData$RESIDEY2))))
+
+filteredData <- reverseFactorLevels(filteredData, "GETALONG_RECODE", "GETALONG")
+filteredData <- reverseFactorLevels(filteredData, "VALUES_RECODE", "VALUES")
+filteredData <- reverseMaritalStatus(filteredData, "MARITLST_RECODE", "MARITLST")
+
+# Rename columns
+colnames(filteredData)[colnames(filteredData) == 'IWDESCRIBE1'] <- 'LITTER'
+colnames(filteredData)[colnames(filteredData) == 'IWDESCRIBE2'] <- 'NOISE'
+colnames(filteredData)[colnames(filteredData) == 'IWDESCRIBE3'] <- 'TRAFFIC'
+colnames(filteredData)[colnames(filteredData) == 'IWDESCRIBE4'] <- 'BLDG_SPACE'
+colnames(filteredData)[colnames(filteredData) == 'IWDESCRIBE5'] <- 'POLLUTION'
+
+
+# Create indices
+#filteredData$INDEX_SC_P <- rowSums(cbind(
+#  as.integer(filteredData$VOLUNTEER)-1,
+#  as.integer(filteredData$ATTEND)-1,
+#  as.integer(filteredData$ATNDSERV2)-1,
+#  as.integer(filteredData$SOCIAL)-1),na.rm=TRUE)
+#filteredData$INDEX_SC_P_NORM <- (filteredData$INDEX_SC_P - 
+#                                   min(filteredData$INDEX_SC_P)) / (
+#                                     max(filteredData$INDEX_SC_P) -
+#                                       min(filteredData$INDEX_SC_P)
+#                                   )
+#filteredData$INDEX_SC_P_AVG <- filteredData$INDEX_SC_P/4
+
+#filteredData$INDEX_SC_N <- rowSums(cbind(
+#  as.integer(filteredData$VISIT)-1, 
+#  as.integer(filteredData$DOFAVORS)-1, 
+#  as.integer(filteredData$PERSADVICE)-1,
+#  as.integer(filteredData$CLOSEKNIT),
+#  as.integer(filteredData$HELPNEIGH),
+#  as.integer(filteredData$GETALONG),
+#  as.integer(filteredData$VALUES),
+#  as.integer(filteredData$CANTRUST)), na.rm=TRUE)
+#filteredData$INDEX_SC_N_NORM <- (filteredData$INDEX_SC_N - 
+#                                   min(filteredData$INDEX_SC_N)) / (
+#                                     max(filteredData$INDEX_SC_N) -
+#                                       min(filteredData$INDEX_SC_N)
+#                                   )
+#filteredData$INDEX_SC_N_AVG <- filteredData$INDEX_SC_N/8
+
+#filteredData$INDEX_SC_F2 <- rowSums(cbind(
+#  as.integer(filteredData$FAMRELY2)-1,
+#  rowSums(cbind(
+#    as.integer(filteredData$FRRELY2)-1,
+#    as.integer(filteredData$FRHELP)-1), na.rm=TRUE)/2), na.rm=TRUE)
+#filteredData$INDEX_SC_F2_NORM <- (filteredData$INDEX_SC_F2 - 
+#                                   min(filteredData$INDEX_SC_F2)) / (
+#                                     max(filteredData$INDEX_SC_F2) -
+#                                       min(filteredData$INDEX_SC_F2)                              )
+#filteredData$INDEX_SC_F2_AVG <- filteredData$INDEX_SC_F2/2
+
+# Calculate probability of walkability
+#filteredData$STRUCTQ <- as.ordered(filteredData$STRUCTQ)
+#filteredData$STRUCTQ_1 <- as.numeric(filteredData$STRUCTQ)
+#temp <- apply(filteredData, 1, function(x) calculateWalkability(as.numeric(x["STRUCTQ_1"])))
+#filteredData$PR_WALK <- rowSums(cbind(
+# temp,
+# 5-as.integer(filteredData$BLDG_SPACE),
+# 5-as.integer(filteredData$AREAAMENITIES),
+# as.integer(filteredData$NOISE),
+# as.integer(filteredData$LITTER)), na.rm=TRUE)
+#rm(temp)
+
+# Fix factors for social and volunteer
+filteredData$SOCIAL_REFACTORED <- fct_collapse(filteredData$SOCIAL, 
+                                               "(1) less than once a year" = c("(0) never", "(1) less than once a year"),
+                                               "(5) weekly" = c("(5) every week","(6) several times a week"))
+filteredData$VOLUNTEER_REFACTORED <- fct_collapse(filteredData$VOLUNTEER, 
+                                               "(1) less than once a year" = c("(0) never", "(1) less than once a year"),
+                                               "(5) weekly" = c("(5) every week","(6) several times a week"))
+
+
+# Set columns as ordered
+filteredData$OTBUILD <- as.ordered(filteredData$OTBUILD)
+filteredData$LITTER <- as.ordered(filteredData$LITTER)
+filteredData$NOISE <- as.ordered(filteredData$NOISE)
+filteredData$TRAFFIC <- as.ordered(filteredData$TRAFFIC)
+filteredData$BLDG_SPACE <- as.ordered(filteredData$BLDG_SPACE)
+filteredData$POLLUTION <- as.ordered(filteredData$POLLUTION)
+filteredData$AREAAMENITIES <- as.ordered(filteredData$AREAAMENITIES)
+
+# Create background table
+backgroundData <- filteredData[c(
+  "ID","AGE","GENDER","MARITLST","MARITLST_RECODE","AGE_CAT","HEARN_RECODE","INCOME_RECODE","INCOME_T","HSASSETS_RECODE","ASSETS_RECODE","ASSETS_T","EDUC","Y_SCHOOLING","RESIDEY2","TIME_IN_RES")]
+#backgroundData <- backgroundData %>% mutate(across(.cols=3:8, as.ordered))
+
+yoBgData <- backgroundData %>% filter(AGE <= 74)
+ooBgData <- backgroundData %>% filter(AGE >= 75)
+
+# Create social capital table
+scData <- filteredData[c("ID","VOLUNTEER","VOLUNTEER_REFACTORED","ATTEND","SOCIAL","SOCIAL_REFACTORED","ATNDSERV2","FAMRELY2","FRRELY2","FRHELP","FRAMT","VISIT","DOFAVORS","PERSADVICE","CLOSEKNIT","HELPNEIGH","GETALONG_RECODE","VALUES_RECODE","CANTRUST","AFRAIDNITE","LEFTOUT2","ISOLATED2")]
+scData <- scData %>% mutate(across(.cols=2:20, as.ordered))
+
+# Create built environment table
+beData <- filteredData[c("ID","STRUCTQ","OTBUILD","LITTER","NOISE","TRAFFIC","BLDG_SPACE","POLLUTION","AREACOMFORT","AREASAFE","AREAAMENITIES")]
+#beData <- beData %>% mutate(across(.cols=2:13, as.ordered))
+
+# Create well-being
+wbData <- filteredData[c("ID","MNTLHLTH3","HAPPY","FLTDEP","FLTEFF","NOSLEEP","WASHAPY","WASLONLY","UNFRIEND","ENJLIFE","FLTSAD","DISLIKD")]
+wbData <- wbData %>% mutate(across(.cols=2:12, as.ordered))
+
+# Create young-old table
+youngOldData <- right_join(wbData, 
+                   right_join(beData,
+                             left_join(yoBgData, scData, by="ID"), by="ID"), by="ID") 
+
+oldOldData <- right_join(wbData, 
+                         right_join(beData,
+                                    left_join(ooBgData, scData, by="ID"), by="ID"), by="ID") 
+
+
+#library(foreign)
+#write.dta(filteredData, "C:/Users/mjcla\\Documents/School/4 Thesis/data/NSHAP/workspace/filteredData.dta")
+
+```
+
+\newpage
+
+# Descriptive Statistics
+
+## Background
+
+```{r descrStatTableBackground, echo=FALSE }
+datasummary_skim(backgroundData[,-1])
+datasummary_skim(backgroundData[,-1], output="descriptive_statistics_background_overall.docx")
+```
+
+## Social Capital Variables
+
+```{r descrStatTableSocial, echo=FALSE }
+datasummary_skim(scData[,-1], title="Social Capital Variables")
+datasummary_skim(scData[,-1], title="Social Capital Variables", output="descriptive_statistics_social_overall.docx")
+```
+
+## Built Environment Variables
+
+```{r descrStatTableBuiltEnvironment, echo=FALSE }
+datasummary_skim(beData[,-1], title="Built Environment Variables")
+#datasummary_skim(beData[,-1], title="Built Environment Variables", output="descriptive_statistics_env_overall.docx")
+```
+
+## Well-being Variables
+
+```{r descrStatTableWellbeing, echo=FALSE }
+datasummary_skim(wbData[,-1], title="Well-being Variables")
+#datasummary_skim(wbData[,-1], title="Well-being Variables", output="descriptive_statistics_health_overall.docx")
+```
+
+## Young-old
+
+```{r descrStatTableYoungOld, echo=FALSE }
+datasummary_skim(youngOldData[,-1], title="Young-old Variables")
+datasummary_skim(youngOldData[,-1], title="Young-old Variables", output="descriptive_statistics_yo_overall.docx")
+```
+
+## Old-old
+
+```{r descrStatTableOldOld, echo=FALSE }
+datasummary_skim(oldOldData[,-1], title="Old-old Variables")
+datasummary_skim(oldOldData[,-1], title="Old-old Variables", output="descriptive_statistics_oo_overall.docx")
+```
+
+\newpage
+
+# Distributions
+
+## Age distribution
+
+Below is the distribution of the age of correspondents:
+
+```{r agedist, echo=FALSE}
+ggplot(data=backgroundData, aes(x=AGE, fill=ifelse(AGE > 74, "Old-Old", "Young-Old"))) +
+  labs(x="Age", y="") +
+  geom_bar() +
+  scale_fill_manual(values=c("gray", "#233445"), name="") + theme_classic()
+```
+
+\newpage
+
+## Additive indices
+```{r indicesDist, echo=FALSE}
+ggplot(data=filteredData, aes(x=INDEX_SC_P_NORM)) +
+  labs(x="Participation in social activities", y="") +
+  geom_bar(fill="#233445") +
+  facet_grid(. ~ filteredData$AGE_CAT, scales='free')
+ggplot(data=filteredData, aes(x=INDEX_SC_N_NORM)) +
+  labs(x="Neighborhood Interaction", y="") +
+  geom_bar(fill="#233445") +
+  facet_grid(. ~ filteredData$AGE_CAT, scales='free')
+ggplot(data=filteredData, aes(x=INDEX_SC_F2_NORM)) +
+  labs(x="Support-exchange", y="") +
+  geom_bar(fill="#233445") +
+  facet_grid(. ~ filteredData$AGE_CAT, scales='free')
+```
+
+
+
+
+# ------------------------------------------------------------------------------
+
+
+# Social Capital
+
+### Gatherings
+
+Below is the number of the participants that attend meetings, attend religious services, volunteer and gather with friends or family in the past 12 months:
+
+```{r socialCapitalAttendance, echo=FALSE}
+#plotFrequencyFill(filteredData, "VOLUNTEER", "Volunteered", "AGE_CAT")
+#plotFrequencyLines(filteredData, "VOLUNTEER", "Volunteered", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "ATTEND", "Attended organized group meetings", "AGE_CAT")
+#plotFrequencyLines(filteredData, "ATTEND", "Attended organized group meetings", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "ATNDSERV2", "Attended religious services", "AGE_CAT")
+#plotFrequencyLines(filteredData, "ATNDSERV2", "Attended religious services", "AGE_CAT") 
+
+#plotFrequencyFill(filteredData, "SOCIAL", "Met with friends or relatives", "AGE_CAT")
+#plotFrequencyLines(filteredData, "SOCIAL", "Met with friends or relatives", "AGE_CAT")
+```
+
+\newpage
+
+### Social Capital Trust and reciprocity
+
+```{r socialCapitalTrust, echo=FALSE}
+
+#plotFrequencyFill(filteredData, "FAMRELY2", "Ability to rely on family", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "FRRELY2", "Ability to rely on friends", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "FRHELP", "Friends asking for help", "AGE_CAT")  
+
+#plotFrequencyFill(filteredData, "FRAMT", "Number of friends", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "VISIT", "Neighborhood interactions", "AGE_CAT")
+#plotFrequencyLines(filteredData, "VISIT", "Neighborhood interactions", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "DOFAVORS", "Neighborhood Favors", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "PERSADVICE", "Neighborly Advice", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "CLOSEKNIT", "Neighbor Familiarity", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "HELPNEIGH", "Neighborly Helpfulness", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "GETALONG", "Neighbors are hostile", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "VALUES", "Neighbors don't share values", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "CANTRUST", "Neighbors are trustworthy", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "LEFTOUT2", "Feel left out", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "ISOLATED2", "Feel isolated", "AGE_CAT")
+#plotFrequencyLines(filteredData, "ISOLATED2", "Felt isolated", "AGE_CAT")
+
+```
+
+
+\newpage
+
+## Environment
+
+Below is the frequency of environmental factors by age: \blandscape
+
+```{r livingEnvironments1, echo=FALSE}
+#plotFrequencyFill(filteredData, "STRUCTQ", "Building Type", "AGE_CAT")
+ggplot(data=filteredData, 
+       aes(x=AGE, fill=STRUCTQ)) +
+  labs(x="Age", y="Frequency") +
+  geom_bar(stat="count", position="fill", width=.5) +
+  scale_y_continuous(labels=scales::percent) +
+  theme_classic() +
+  scale_fill_grey(name="Building Type", na.value="white")
+```
+
+```{=tex}
+\elandscape
+\newpage
+```
+
+```{r livingEnvironments2, echo=FALSE}
+#plotFrequencyFill(filteredData , "OTBUILD", "State of maintenance of area's buildings", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "LITTER", "Street Cleanliness", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "NOISE", "Street Noise", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "TRAFFIC", "Street Traffic", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "BLDG_SPACE", "Distance between houses", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "AREASAFE", "Perceived Safety", "AGE_CAT")
+
+#plotFrequencyFill(filteredData, "AREAAMENITIES", "Area Amenities", "AGE_CAT")
+#plotFrequencyLines(filteredData, "AREAAMENITIES", "Area Amenities", "AGE_CAT")
+
+```
+
+\newpage
+
+## Well-being
+
+The following charts shows the overall level of mental health and happiness:
+
+```{r overallHealth, echo=FALSE}
+#plotFrequencyFill(filteredData , "MNTLHLTH3", "Emotional or Mental Health", "AGE_CAT")
+#plotFrequencyLines(filteredData, "MNTLHLTH3", "Emotional or Mental Health", "AGE_CAT")
+
+#plotFrequencyFill(filteredData , "HAPPY", "Happiness", "AGE_CAT")
+
+
+```
+
+\newpage
+
+The following charts shows the weekly self-assessment of emotional health:
+
+```{r weeklyHealth, echo=FALSE}
+#plotFrequencyFill(filteredData , "FLTDEP", "Depression", "AGE_CAT")
+
+#plotFrequencyFill(filteredData , "WASHAPY", "Felt happy", "AGE_CAT")
+
+#plotFrequencyFill(filteredData , "WASLONLY", "Felt lonely", "AGE_CAT")  
+
+#plotFrequencyFill(filteredData , "UNFRIEND", "Felt people were unfriendly", "AGE_CAT")
+
+#plotFrequencyFill(filteredData , "ENJLIFE", "Enjoyed life", "AGE_CAT")
+
+#plotFrequencyFill(filteredData , "FLTSAD", "Felt sad", "AGE_CAT")  
+
+#plotFrequencyFill(filteredData , "DISLIKD", "Felt disliked", "AGE_CAT")   
+```
+
+```{=tex}
+\newpage
+\blandscape
+```
+
+
+# ------------------------------------------------------------------------------
+
+# Correlations & Cross Tables
+
+The following chart shows the crosstable between marital status and isolation
+```{r marriageCrossTable, echo=FALSE}
+crosstable(filteredData, c(ISOLATED2,LEFTOUT2), percent_digits=1, percent_pattern="{p_col}", by=MARITLST, showNA="no") %>% as_flextable(keep_id=F)
+```
+
+The following chart shows the correlation between different social capital variables:
+
+```{r scCorrelations, echo=FALSE}
+scData[,-1] %>% mutate_all(as.numeric) %>% datasummary_correlation()
+
+```
+
+```{=tex}
+\elandscape
+\newpage
+\blandscape
+```
+The following chart shows the correlation between social capital variables and the built environment variables:
+
+```{r sc_be_Correlations, echo=FALSE}
+#sc_be_corr <- cor(mutate_all(scData[,-1], as.numeric), mutate_all(beData[,-1],as.numeric),use="pairwise.complete.obs")
+#sc_be_corr %>% kbl() %>% kable_classic("hover", full_width=FALSE)
+#ggcorrplot(sc_be_corr, lab=TRUE, lab_size = 2)
+
+# SOCIAL   ##################################
+
+crosstable(filteredData, c(OTBUILD), by=SOCIAL_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(filteredData, c(AREAAMENITIES), by=SOCIAL_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(filteredData, c(BLDG_SPACE), by=SOCIAL_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(youngOldData, c(OTBUILD), by=SOCIAL_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(youngOldData, c(AREAAMENITIES), by=SOCIAL_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(youngOldData, c(BLDG_SPACE), by=SOCIAL_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(oldOldData, c(OTBUILD), by=SOCIAL_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(oldOldData, c(AREAAMENITIES), by=SOCIAL_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(oldOldData, c(BLDG_SPACE), by=SOCIAL_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+# VOLUNTEER ##################################
+
+crosstable(filteredData, c(OTBUILD), by=VOLUNTEER_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(filteredData, c(AREAAMENITIES), by=VOLUNTEER_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(filteredData, c(BLDG_SPACE), by=VOLUNTEER_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(youngOldData, c(OTBUILD), by=VOLUNTEER_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(youngOldData, c(AREAAMENITIES), by=VOLUNTEER_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(youngOldData, c(BLDG_SPACE), by=VOLUNTEER_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(oldOldData, c(OTBUILD), by=VOLUNTEER_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(oldOldData, c(AREAAMENITIES), by=VOLUNTEER_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(oldOldData, c(BLDG_SPACE), by=VOLUNTEER_REFACTORED, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+# FRRELY2 ##############################
+
+crosstable(filteredData, c(OTBUILD), by=FRRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(filteredData, c(AREAAMENITIES), by=FRRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(filteredData, c(BLDG_SPACE), by=FRRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(youngOldData, c(OTBUILD), by=FRRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(youngOldData, c(AREAAMENITIES), by=FRRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(youngOldData, c(BLDG_SPACE), by=FRRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(oldOldData, c(OTBUILD), by=FRRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(oldOldData, c(AREAAMENITIES), by=FRRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(oldOldData, c(BLDG_SPACE), by=FRRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+# FAMRELY2 ##############################
+
+crosstable(filteredData, c(OTBUILD), by=FAMRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(filteredData, c(AREAAMENITIES), by=FAMRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(filteredData, c(BLDG_SPACE), by=FAMRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(youngOldData, c(OTBUILD), by=FAMRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(youngOldData, c(AREAAMENITIES), by=FAMRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(youngOldData, c(BLDG_SPACE), by=FAMRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(oldOldData, c(OTBUILD), by=FAMRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(oldOldData, c(AREAAMENITIES), by=FAMRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(oldOldData, c(BLDG_SPACE), by=FAMRELY2, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+# VISIT ##############################
+
+crosstable(filteredData, c(OTBUILD), by=VISIT, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(filteredData, c(AREAAMENITIES), by=VISIT, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(filteredData, c(BLDG_SPACE), by=VISIT, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(youngOldData, c(OTBUILD), by=VISIT, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(youngOldData, c(AREAAMENITIES), by=VISIT, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(youngOldData, c(BLDG_SPACE), by=VISIT, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(oldOldData, c(OTBUILD), by=VISIT, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(oldOldData, c(AREAAMENITIES), by=VISIT, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(oldOldData, c(BLDG_SPACE), by=VISIT, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+# DOFAVORS ##############################
+
+crosstable(filteredData, c(OTBUILD), by=DOFAVORS, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(filteredData, c(AREAAMENITIES), by=DOFAVORS, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(filteredData, c(BLDG_SPACE), by=DOFAVORS, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(youngOldData, c(OTBUILD), by=DOFAVORS, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(youngOldData, c(AREAAMENITIES), by=DOFAVORS, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(youngOldData, c(BLDG_SPACE), by=DOFAVORS, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(oldOldData, c(OTBUILD), by=DOFAVORS, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(oldOldData, c(AREAAMENITIES), by=DOFAVORS, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+crosstable(oldOldData, c(BLDG_SPACE), by=DOFAVORS, percent_digits=2, percent_pattern="{p_row}", total="both", showNA="no") %>% as_flextable(keep_id=F)
+
+#datasummary_crosstab(SOCIAL ~ OTBUILD, statistic = 1 ~ Percent("col"), data=filteredData)
+
+
+```
+
+\elandscape
+
+```{=tex}
+\newpage
+\blandscape
+```
+The following chart shows the correlation between social capital variables and the well-being variables:
+
+```{r sc_wb_Correlations, echo=FALSE}
+#sc_wb_corr <- cor(mutate_all(scData[,-1], as.numeric), mutate_all(wbData[,-1],as.numeric),use="pairwise.complete.obs")
+sc_wb_corr <- cor(mutate_all(scData[,c("LEFTOUT2","ISOLATED2")], as.numeric),
+                  mutate_all(wbData[,c("MNTLHLTH3","FLTDEP","WASHAPY","FLTSAD","WASLONLY","DISLIKD")],as.numeric),
+                  use="pairwise.complete.obs")
+sc_wb_corr %>% kable() %>% kable_classic("hover", full_width=FALSE)
+#ggcorrplot(sc_wb_corr, lab=TRUE, lab_size = 2) + theme_classic()
+
+crosstable(filteredData, c(MNTLHLTH3), by=SOCIAL, percent_pattern="{p_row}", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(filteredData, c(MNTLHLTH3), by=VOLUNTEER, percent_pattern="{p_row}", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(filteredData, c(MNTLHLTH3), by=FRRELY2, percent_pattern="{p_row}", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(filteredData, c(MNTLHLTH3), by=FAMRELY2, percent_pattern="{p_row}", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(filteredData, c(MNTLHLTH3), by=VISIT, percent_pattern="{p_row}", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(filteredData, c(MNTLHLTH3), by=DOFAVORS, percent_pattern="{p_row}", showNA="no") %>% as_flextable(keep_id=F)
+
+crosstable(filteredData, c(HAPPY), by=LEFTOUT2, percent_pattern="{p_row}", showNA="no") %>% as_flextable(keep_id=F)
+
+```
+
+
+# ------------------------------------------------------------------------------
+
+
+
+```{=tex}
+\elandscape
+\newpage
+```
+# Regression Modelling
+
+## Non-indexed Regression model
+```{r regression_non-indexed, echo=FALSE}
+
+runOrdinalRegression2(filteredData,"OTBUILD","SOCIAL") %>% tidy(conf.int=T) %>% kable()
+runOrdinalRegression2(filteredData,"AREAAMENITIES","SOCIAL") %>% tidy(conf.int=T) %>% kable()
+runOrdinalRegression2(filteredData,"BLDG_SPACE","SOCIAL") %>% tidy(conf.int=T) %>% kable()
+
+runOrdinalRegression2(filteredData,"OTBUILD","VOLUNTEER") %>% tidy(conf.int=T) %>% kable()
+runOrdinalRegression2(filteredData,"AREAAMENITIES","VOLUNTEER") %>% tidy(conf.int=T) %>% kable()
+runOrdinalRegression2(filteredData,"BLDG_SPACE","VOLUNTEER") %>% tidy(conf.int=T) %>% kable()
+
+runOrdinalRegression2(filteredData,"OTBUILD","FRRELY2") %>% tidy(conf.int=T) %>% kable()
+runOrdinalRegression2(filteredData,"AREAAMENITIES","FRRELY2") %>% tidy(conf.int=T) %>% kable()
+runOrdinalRegression2(filteredData,"BLDG_SPACE","FRRELY2") %>% tidy(conf.int=T) %>% kable()
+
+runOrdinalRegression2(filteredData,"OTBUILD","FAMRELY2") %>% tidy(conf.int=T) %>% kable()
+runOrdinalRegression2(filteredData,"AREAAMENITIES","FAMRELY2") %>% tidy(conf.int=T) %>% kable()
+runOrdinalRegression2(filteredData,"BLDG_SPACE","FAMRELY2") %>% tidy(conf.int=T) %>% kable()
+
+runOrdinalRegression2(filteredData,"OTBUILD","VISIT") %>% tidy(conf.int=T) %>% kable()
+runOrdinalRegression2(filteredData,"AREAAMENITIES","VISIT") %>% tidy(conf.int=T) %>% kable()
+runOrdinalRegression2(filteredData,"BLDG_SPACE","VISIT") %>% tidy(conf.int=T) %>% kable()
+
+runOrdinalRegression2(filteredData,"OTBUILD","DOFAVORS") %>% tidy(conf.int=T) %>% kable()
+runOrdinalRegression2(filteredData,"AREAAMENITIES","DOFAVORS") %>% tidy(conf.int=T) %>% kable()
+runOrdinalRegression2(filteredData,"BLDG_SPACE","DOFAVORS") %>% tidy(conf.int=T) %>% kable()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###------------------------------------------------------------------------
+## Regression model for participation in social activites
+
+```{r regression_participation, echo=FALSE}
+#ggplot(data=subset(youngOldData, !is.na(AREAAMENITIES)), 
+#       aes(x=AREAAMENITIES,
+#           y=INDEX_SC_P,
+#           group=EDUC,
+#           color=factor(EDUC))) +
+#  labs(x="Area Amenities", y="Participation Level") +
+#  geom_point() +
+#  geom_smooth(method="lm", aes(x=as.numeric(AREAAMENITIES), y=INDEX_SC_P), se=F) +
+#  theme_classic()
+
+beList <- c("STRUCTQ","OTBUILD","LITTER","NOISE","TRAFFIC","BLDG_SPACE","POLLUTION","AREAAMENITIES")
+reg.p =list()
+j = 1
+for(i in beList) {
+  reg.p[[j]] = list()
+  reg.p[[j]][["yo"]] <- runLinearRegression2(youngOldData, i, "INDEX_SC_P_NORM")
+  reg.p[[j]][["oo"]] <- runLinearRegression2(oldOldData, i, "INDEX_SC_P_NORM")
+  reg.p[[j]][["t"]] <- runLinearRegression2(filteredData, i, "INDEX_SC_P_NORM")
+  j = j + 1
+}
+
+models <- list(
+"0yo" = runLinearRegression2(youngOldData, "STRUCTQ", "INDEX_SC_P_NORM"),
+"0oo" = runLinearRegression2(oldOldData, "STRUCTQ", "INDEX_SC_P_NORM"),
+"0t" = runLinearRegression2(filteredData, "STRUCTQ", "INDEX_SC_P_NORM"),
+"1yo" = runLinearRegression2(youngOldData, "OTBUILD", "INDEX_SC_P_NORM"),
+"1oo" = runLinearRegression2(oldOldData, "OTBUILD", "INDEX_SC_P_NORM"),
+"1t" = runLinearRegression2(filteredData, "OTBUILD", "INDEX_SC_P_NORM"),
+"2yo" = runLinearRegression2(youngOldData, "LITTER", "INDEX_SC_P_NORM"),
+"2oo" = runLinearRegression2(oldOldData, "LITTER", "INDEX_SC_P_NORM"),
+"2t" = runLinearRegression2(filteredData, "LITTER", "INDEX_SC_P_NORM"),
+"3yo" = runLinearRegression2(youngOldData, "NOISE", "INDEX_SC_P_NORM"),
+"3oo" = runLinearRegression2(oldOldData, "NOISE", "INDEX_SC_P_NORM"),
+"3t" = runLinearRegression2(filteredData, "NOISE", "INDEX_SC_P_NORM"),
+"4yo" = runLinearRegression2(youngOldData, "TRAFFIC", "INDEX_SC_P_NORM"),
+"4oo" = runLinearRegression2(oldOldData, "TRAFFIC", "INDEX_SC_P_NORM"),
+"4t" = runLinearRegression2(filteredData, "TRAFFIC", "INDEX_SC_P_NORM"),
+"5yo" = runLinearRegression2(youngOldData, "BLDG_SPACE", "INDEX_SC_P_NORM"),
+"5oo" = runLinearRegression2(oldOldData, "BLDG_SPACE", "INDEX_SC_P_NORM"),
+"5t" = runLinearRegression2(filteredData, "BLDG_SPACE", "INDEX_SC_P_NORM"),
+"6yo" = runLinearRegression2(youngOldData, "POLLUTION", "INDEX_SC_P_NORM"),
+"6oo" = runLinearRegression2(oldOldData, "POLLUTION", "INDEX_SC_P_NORM"),
+"6t" = runLinearRegression2(filteredData, "POLLUTION", "INDEX_SC_P_NORM"),
+"7yo" = runLinearRegression2(youngOldData, "AREAAMENITIES", "INDEX_SC_P_NORM"),
+"7oo" = runLinearRegression2(oldOldData, "AREAAMENITIES", "INDEX_SC_P_NORM"),
+"7t" = runLinearRegression2(filteredData, "AREAAMENITIES", "INDEX_SC_P_NORM")
+)
+
+modelsummary(models)
+#runLinearRegression(youngOldData, "TRAFFIC", "INDEX_SC_P")
+
+
+
+#runLinearRegression(youngOldData, "BLDG_SPACE", "INDEX_SC_P")
+```
+
+```{r regression_participation_solo, echo=FALSE}
+
+runLinearRegression3(youngOldData, "STRUCTQ", "INDEX_SC_N_NORM")
+```
+
+## Regression model for neighborhood interaction
+
+```{r regression_neighborhood, echo=FALSE}
+#ggplot(data=subset(youngOldData, !is.na(AREAAMENITIES)), 
+#       aes(x=AREAAMENITIES,
+#           y=INDEX_SC_P,
+#           group=EDUC,
+#           color=factor(EDUC))) +
+#  labs(x="Area Amenities", y="Participation Level") +
+#  geom_point() +
+#  geom_smooth(method="lm", aes(x=as.numeric(AREAAMENITIES), y=INDEX_SC_P), se=F) +
+#  theme_classic()
+
+beList <- c("STRUCTQ","OTBUILD","LITTER","NOISE","TRAFFIC","BLDG_SPACE","POLLUTION","AREAAMENITIES")
+reg.p =list()
+j = 1
+for(i in beList) {
+  reg.p[[j]] = list()
+  reg.p[[j]][["yo"]] <- runLinearRegression2(youngOldData, i, "INDEX_SC_N_NORM")
+  reg.p[[j]][["oo"]] <- runLinearRegression2(oldOldData, i, "INDEX_SC_N_NORM")
+  reg.p[[j]][["t"]] <- runLinearRegression2(filteredData, i, "INDEX_SC_N_NORM")
+  j = j + 1
+}
+
+models <- list(
+"0yo" = runLinearRegression2(youngOldData, "STRUCTQ", "INDEX_SC_N_NORM"),
+"0oo" = runLinearRegression2(oldOldData, "STRUCTQ", "INDEX_SC_N_NORM"),
+"0t" = runLinearRegression2(filteredData, "STRUCTQ", "INDEX_SC_N_NORM")
+)
+
+models <- list(
+"1yo" = runLinearRegression2(youngOldData, "OTBUILD", "INDEX_SC_N_NORM"),
+"1oo" = runLinearRegression2(oldOldData, "OTBUILD", "INDEX_SC_N_NORM"),
+"1t" = runLinearRegression2(filteredData, "OTBUILD", "INDEX_SC_N_NORM"),
+"2yo" = runLinearRegression2(youngOldData, "LITTER", "INDEX_SC_N_NORM"),
+"2oo" = runLinearRegression2(oldOldData, "LITTER", "INDEX_SC_N_NORM"),
+"2t" = runLinearRegression2(filteredData, "LITTER", "INDEX_SC_N_NORM")
+)
+models <- list(
+"3yo" = runLinearRegression2(youngOldData, "NOISE", "INDEX_SC_N_NORM"),
+"3oo" = runLinearRegression2(oldOldData, "NOISE", "INDEX_SC_N_NORM"),
+"3t" = runLinearRegression2(filteredData, "NOISE", "INDEX_SC_N_NORM"),
+"4yo" = runLinearRegression2(youngOldData, "TRAFFIC", "INDEX_SC_N_NORM"),
+"4oo" = runLinearRegression2(oldOldData, "TRAFFIC", "INDEX_SC_N_NORM"),
+"4t" = runLinearRegression2(filteredData, "TRAFFIC", "INDEX_SC_N_NORM")
+)
+
+models <- list(
+"5yo" = runLinearRegression2(youngOldData, "BLDG_SPACE", "INDEX_SC_N_NORM"),
+"5oo" = runLinearRegression2(oldOldData, "BLDG_SPACE", "INDEX_SC_N_NORM"),
+"5t" = runLinearRegression2(filteredData, "BLDG_SPACE", "INDEX_SC_N_NORM"),
+"6yo" = runLinearRegression2(youngOldData, "POLLUTION", "INDEX_SC_N_NORM"),
+"6oo" = runLinearRegression2(oldOldData, "POLLUTION", "INDEX_SC_N_NORM"),
+"6t" = runLinearRegression2(filteredData, "POLLUTION", "INDEX_SC_N_NORM")
+)
+
+models <- list(
+"7yo" = runLinearRegression2(youngOldData, "AREAAMENITIES", "INDEX_SC_N_NORM"),
+"7oo" = runLinearRegression2(oldOldData, "AREAAMENITIES", "INDEX_SC_N_NORM"),
+"7t" = runLinearRegression2(filteredData, "AREAAMENITIES", "INDEX_SC_N_NORM")
+)
+
+modelsummary(models)
+#runLinearRegression(youngOldData, "TRAFFIC", "INDEX_SC_P")
+
+
+
+#runLinearRegression(youngOldData, "BLDG_SPACE", "INDEX_SC_P")
+```
+
+
+## Regression model for support-exchange interaction
+
+```{r regression_f2, echo=FALSE}
+#ggplot(data=subset(youngOldData, !is.na(AREAAMENITIES)), 
+#       aes(x=AREAAMENITIES,
+#           y=INDEX_SC_P,
+#           group=EDUC,
+#           color=factor(EDUC))) +
+#  labs(x="Area Amenities", y="Participation Level") +
+#  geom_point() +
+#  geom_smooth(method="lm", aes(x=as.numeric(AREAAMENITIES), y=INDEX_SC_P), se=F) +
+#  theme_classic()
+
+beList <- c("STRUCTQ","OTBUILD","LITTER","NOISE","TRAFFIC","BLDG_SPACE","POLLUTION","AREAAMENITIES")
+reg.p =list()
+j = 1
+for(i in beList) {
+  reg.p[[j]] = list()
+  reg.p[[j]][["yo"]] <- runLinearRegression2(youngOldData, i, "INDEX_SC_F2_NORM")
+  reg.p[[j]][["oo"]] <- runLinearRegression2(oldOldData, i, "INDEX_SC_F2_NORM")
+  reg.p[[j]][["t"]] <- runLinearRegression2(filteredData, i, "INDEX_SC_F2_NORM")
+  j = j + 1
+}
+
+models <- list(
+"0yo" = runLinearRegression2(youngOldData, "STRUCTQ", "INDEX_SC_F2_NORM"),
+"0oo" = runLinearRegression2(oldOldData, "STRUCTQ", "INDEX_SC_F2_NORM"),
+"0t" = runLinearRegression2(filteredData, "STRUCTQ", "INDEX_SC_F2_NORM")
+)
+
+models <- list(
+"1yo" = runLinearRegression2(youngOldData, "OTBUILD", "INDEX_SC_F2_NORM"),
+"1oo" = runLinearRegression2(oldOldData, "OTBUILD", "INDEX_SC_F2_NORM"),
+"1t" = runLinearRegression2(filteredData, "OTBUILD", "INDEX_SC_F2_NORM"),
+"2yo" = runLinearRegression2(youngOldData, "LITTER", "INDEX_SC_F2_NORM"),
+"2oo" = runLinearRegression2(oldOldData, "LITTER", "INDEX_SC_F2_NORM"),
+"2t" = runLinearRegression2(filteredData, "LITTER", "INDEX_SC_F2_NORM")
+)
+models <- list(
+"3yo" = runLinearRegression2(youngOldData, "NOISE", "INDEX_SC_F2_NORM"),
+"3oo" = runLinearRegression2(oldOldData, "NOISE", "INDEX_SC_F2_NORM"),
+"3t" = runLinearRegression2(filteredData, "NOISE", "INDEX_SC_F2_NORM"),
+"4yo" = runLinearRegression2(youngOldData, "TRAFFIC", "INDEX_SC_F2_NORM"),
+"4oo" = runLinearRegression2(oldOldData, "TRAFFIC", "INDEX_SC_F2_NORM"),
+"4t" = runLinearRegression2(filteredData, "TRAFFIC", "INDEX_SC_F2_NORM")
+)
+
+models <- list(
+"5yo" = runLinearRegression2(youngOldData, "BLDG_SPACE", "INDEX_SC_F2_NORM"),
+"5oo" = runLinearRegression2(oldOldData, "BLDG_SPACE", "INDEX_SC_F2_NORM"),
+"5t" = runLinearRegression2(filteredData, "BLDG_SPACE", "INDEX_SC_F2_NORM"),
+"6yo" = runLinearRegression2(youngOldData, "POLLUTION", "INDEX_SC_F2_NORM"),
+"6oo" = runLinearRegression2(oldOldData, "POLLUTION", "INDEX_SC_F2_NORM"),
+"6t" = runLinearRegression2(filteredData, "POLLUTION", "INDEX_SC_F2_NORM")
+)
+
+models <- list(
+"7yo" = runLinearRegression2(youngOldData, "AREAAMENITIES", "INDEX_SC_F2_NORM"),
+"7oo" = runLinearRegression2(oldOldData, "AREAAMENITIES", "INDEX_SC_F2_NORM"),
+"7t" = runLinearRegression2(filteredData, "AREAAMENITIES", "INDEX_SC_F2_NORM")
+)
+
+modelsummary(models)
+```
+
+
+
+
+
+
+## Stepwise regression
+
+```{r regression_stepwise, echo=FALSE}
+#model <- stepAIC(clm(
+#  MNTLHLTH3 ~ INDEX_SC_P_NORM + INDEX_SC_N_NORM + INDEX_SC_F2_NORM,
+#  data = youngOldData), direction = "forward", trace = T)
+tempSubset <- filteredData[,c("MNTLHLTH3","INDEX_SC_P_NORM","INDEX_SC_N_NORM","INDEX_SC_F2_NORM","INCOME_T","ASSETS_T","Y_SCHOOLING")]
+tempSubset <- subset[which(complete.cases(subset[,c("MNTLHLTH3","INCOME_T","ASSETS_T","Y_SCHOOLING")])),]
+model1 <- step(polr(MNTLHLTH3 ~ ., data = tempSubset),
+               direction = "forward", trace = T)
+
+# MENTAL HEALTH
+models <- runStepWiseRegression(youngOldData, oldOldData, filteredData, "MNTLHLTH3")
+coeftest(models[[1]])
+coeftest(models[[2]])
+coeftest(models[[3]])
+modelsummary(models)
+
+# HAPPY
+models <- runStepWiseRegression(youngOldData, oldOldData, filteredData, "HAPPY")
+coeftest(models[[1]])
+coeftest(models[[2]])
+coeftest(models[[3]])
+modelsummary(models)
+
+# DEPRESSED
+models <- runStepWiseRegression(youngOldData, oldOldData, filteredData, "FLTDEP")
+coeftest(models[[1]])
+coeftest(models[[2]])
+coeftest(models[[3]])
+modelsummary(models)
+modelsummary(models)
+
+# EFFORT
+models <- runStepWiseRegression(youngOldData, oldOldData, filteredData, "FLTEFF")
+coeftest(models[[1]])
+coeftest(models[[2]])
+coeftest(models[[3]])
+modelsummary(models)
+modelsummary(models)
+
+# NOSLEEP
+models <- runStepWiseRegression(youngOldData, oldOldData, filteredData, "NOSLEEP")
+coeftest(models[[1]])
+coeftest(models[[2]])
+coeftest(models[[3]])
+modelsummary(models)
+modelsummary(models)
+
+# WASHAPY
+models <- runStepWiseRegression(youngOldData, oldOldData, filteredData, "WASHAPY")
+coeftest(models[[1]])
+coeftest(models[[2]])
+coeftest(models[[3]])
+modelsummary(models)
+modelsummary(models)
+
+
+# WASLONLY
+models <- runStepWiseRegression(youngOldData, oldOldData, filteredData, "WASLONLY")
+coeftest(models[[1]])
+coeftest(models[[2]])
+coeftest(models[[3]])
+modelsummary(models)
+modelsummary(models)
+
+# UNFRIEND
+models <- runStepWiseRegression(youngOldData, oldOldData, filteredData, "UNFRIEND")
+coeftest(models[[1]])
+coeftest(models[[2]])
+coeftest(models[[3]])
+modelsummary(models)
+modelsummary(models)
+
+# ENJLIFE
+models <- runStepWiseRegression(youngOldData, oldOldData, filteredData, "ENJLIFE")
+coeftest(models[[1]])
+coeftest(models[[2]])
+coeftest(models[[3]])
+modelsummary(models)
+modelsummary(models)
+
+# FLTSAD
+models <- runStepWiseRegression(youngOldData, oldOldData, filteredData, "FLTSAD")
+coeftest(models[[1]])
+coeftest(models[[2]])
+coeftest(models[[3]])
+modelsummary(models)
+modelsummary(models)
+
+# DISLIKD
+models <- runStepWiseRegression(youngOldData, oldOldData, filteredData, "DISLIKD")
+coeftest(models[[1]])
+coeftest(models[[2]])
+coeftest(models[[3]])
+modelsummary(models)
+modelsummary(models)
+```
+
+
+
+
+
+
+
+## Regression model for participation in social activites for the young old
+
+```{r regression_neighborhood_yo, echo=FALSE}
+ggplot(data=subset(youngOldData, !is.na(AREAAMENITIES)), 
+       aes(x=AREAAMENITIES,
+           y=INDEX_SC_N,
+           group=EDUC,
+           color=factor(EDUC))) +
+  labs(x="Area Amenities", y="Level of Neighborhood Interactions") +
+  geom_point() +
+  geom_smooth(method="lm", aes(x=as.numeric(AREAAMENITIES), y=INDEX_SC_N), se=F) +
+  theme_classic()
+ggplot(data=subset(youngOldData, !is.na(AREAAMENITIES)
+                   & !is.na(INCOME_RECODE)), 
+       aes(x=AREAAMENITIES,
+           y=INDEX_SC_N,
+           group=HEARN_RECODE,
+           color=factor(HEARN_RECODE))) +
+  labs(x="Area Amenities", y="Level of Neighborhood Interactions") +
+  geom_point() +
+  geom_smooth(method="lm", aes(x=as.numeric(AREAAMENITIES), y=INDEX_SC_N), se=F) +
+  theme_classic()
+ggplot(data=subset(youngOldData, !is.na(AREAAMENITIES)
+                   & !is.na(ASSETS_RECODE)), 
+       aes(x=AREAAMENITIES,
+           y=INDEX_SC_N,
+           group=HSASSETS_RECODE,
+           color=factor(HSASSETS_RECODE))) +
+  labs(x="Area Amenities", y="Level of Neighborhood Interactions") +
+  geom_point() +
+  geom_smooth(method="lm", aes(x=as.numeric(AREAAMENITIES), y=INDEX_SC_N), se=F) +
+  theme_classic()
+ggplot(data=subset(youngOldData, !is.na(AREAAMENITIES)), 
+       aes(x=AREAAMENITIES,
+           y=INDEX_SC_N,
+           group=MARITLST,
+           color=factor(MARITLST))) +
+  labs(x="Area Amenities", y="Level of Neighborhood Interactions") +
+  geom_point() +
+  geom_smooth(method="lm", aes(x=as.numeric(AREAAMENITIES), y=INDEX_SC_N), se=F) +
+  theme_classic()
+runLinearRegression(youngOldData, "AREAAMENITIES", "INDEX_SC_N")
+
+ggplot(data=subset(youngOldData, !is.na(TRAFFIC)), 
+       aes(x=TRAFFIC, y=INDEX_SC_N, group = EDUC, color=factor(EDUC))) +
+  labs(x="Traffic", y="Level of Neighborhood Interactions") +
+  geom_point() +
+  geom_smooth(method="lm", aes(x=as.numeric(TRAFFIC), y=INDEX_SC_N), se=F) +
+  theme_classic()
+runLinearRegression(youngOldData, "TRAFFIC", "INDEX_SC_N")
+
+ggplot(data=subset(youngOldData, !is.na(BLDG_SPACE)), 
+       aes(x=BLDG_SPACE, y=INDEX_SC_N)) +
+  labs(x="Building Space", y="Level of Neighborhood Interactions") +
+  geom_point() +
+  geom_smooth(method="lm", aes(x=as.numeric(BLDG_SPACE), y=INDEX_SC_N), se=F) +
+  theme_classic()
+runLinearRegression(youngOldData, "BLDG_SPACE", "INDEX_SC_N")
+```
